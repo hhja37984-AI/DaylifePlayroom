@@ -1,7 +1,7 @@
 //@name calendar_diary
 //@display-name 달력
 //@api 3.0
-//@version 0.1.4
+//@version 0.1.5
 //@update-url https://raw.githubusercontent.com/hhja37984-AI/DaylifePlayroom/refs/heads/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
@@ -135,14 +135,14 @@
     const saved = await api.getChatFromIndex(ctx.characterIndex, ctx.chatIndex);
     return {...ctx, chatId: saved.id};
   }
-  let detailListeners = [], cellStyles = new Map();
+  let detailListeners = [], selectionWeeks = new Map();
   async function clearDetails() {
     const old = detailListeners; detailListeners = [];
     for (const [el,id] of old) { try { await el.removeEventListener('click',id); } catch (_) {} }
   }
   async function clearSide() {
     await clearDetails();
-    cellStyles.clear();
+    selectionWeeks.clear();
     const old = listeners; listeners = [];
     for (const [el,id] of old) { try { await el.removeEventListener('click',id); } catch (_) {} }
     const oldRoot = root; root = null;
@@ -202,16 +202,22 @@
     await detail.setInnerHTML(entries + (day.note ? '<div style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;font-size:12px;padding:6px 0">' + esc(day.note) + '</div>' : ''));
     await attachSideBindings(detail,bindings,detailListeners);
   }
+  function selectionLayer(key, week) {
+    const position = selectionWeeks.get(key);
+    if (!position || position.week !== week) return '';
+    return '<div style="position:absolute;top:0;bottom:0;left:' + (position.col*100/7) + '%;width:' + (100/7) + '%;background:rgba(86,160,244,.14);pointer-events:none;box-sizing:border-box;"></div>';
+  }
   async function selectDate(key) {
     if (key === selected) return;
-    const previous = selected;
+    const previous = selectionWeeks.get(selected);
     selected = key;
     if (!root || !expanded) return;
-    for (const date of [previous,key]) {
-      const style = cellStyles.get(date);
-      if (!style) continue;
-      const cell = await root.querySelector('[x-diary-date="' + date + '"]');
-      if (cell) await cell.setStyleAttribute(style + (date === selected ? 'background:#edf5ff;' : 'background:#fff;'));
+    const current = selectionWeeks.get(key);
+    const affected = new Set([previous?.week,current?.week]);
+    for (const week of affected) {
+      if (week === undefined) continue;
+      const layer = await root.querySelector('[x-diary-selection="' + week + '"]');
+      if (layer) await layer.setInnerHTML(selectionLayer(selected,week));
     }
     await renderSelectedDetails();
   }
@@ -255,8 +261,8 @@
           const labels = single.map(e => '<div style="font-size:11px;line-height:1.25;overflow-wrap:anywhere;letter-spacing:-.03em;' + (e.done ? 'text-decoration:line-through;opacity:.65;' : '') + '">' + esc(e.title) + '</div>').join('');
           const note = d?.days?.[key]?.note;
           const cellStyle = buttonStyle + base + 'text-align:left;align-self:stretch;width:100%;padding:' + eventTop + 'px 3px 4px;';
-          cellStyles.set(key,cellStyle);
-          const background = key === selected ? 'background:#edf5ff;' : 'background:#fff;';
+          selectionWeeks.set(key,{week:i/7,col});
+          const background = 'background:#fff;';
           const dateStyle = key === today ? 'font-weight:700;color:#2769a8;' : '';
           return '<button type="button" x-diary-date="' + esc(key) + '" aria-label="' + esc(key) + '" data-diary-action="' + bind(() => selectDate(key)) + '" style="' + cellStyle + background + '">' +
             '<span style="position:absolute;top:2px;left:4px;font-size:12px;' + dateStyle + '">' + Number(key.slice(-2)) + '</span>' +
@@ -266,7 +272,7 @@
           const startsHere = wk[e.first] === e.startDate;
           return '<div style="grid-row:1;grid-column:' + (e.first+1) + ' / ' + (e.last+2) + ';align-self:start;margin-top:' + (17+e.lane*15) + 'px;height:13px;line-height:13px;background:linear-gradient(to bottom,transparent 60%,rgba(86,160,244,.3) 60%);font-size:10px;padding-left:4px;min-width:0;overflow:hidden;white-space:nowrap;z-index:1;pointer-events:none;' + (e.done ? 'opacity:.55;text-decoration:line-through;' : '') + '">' + (startsHere || e.first === 0 || !wk[e.first-1] ? esc(e.title) : '') + '</div>';
         }).join('');
-        weeks.push('<div style="position:relative;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:minmax(' + Math.max(70,eventTop+20) + 'px,auto)">' + cells + bars + '</div>');
+        weeks.push('<div style="position:relative;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:minmax(' + Math.max(70,eventTop+20) + 'px,auto)">' + cells + bars + '<div x-diary-selection="' + (i/7) + '" style="position:absolute;inset:0;z-index:2;pointer-events:none;">' + selectionLayer(selected,i/7) + '</div></div>');
       }
       html = b('', async () => {expanded = false; await renderSide();}, 'position:fixed;inset:0;width:100vw;height:100dvh;padding:0;background:transparent;z-index:0;', '달력 바깥을 눌러 닫기') +
         '<section style="position:relative;z-index:1;width:min(350px,calc(100vw - 18px));max-height:74dvh;overflow:auto;overscroll-behavior:contain;background:#fff;border:1px solid #ddd;border-right:0;border-radius:4px 0 0 4px;padding:8px;box-sizing:border-box;color:#333;">' +
