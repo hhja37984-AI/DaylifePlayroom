@@ -1,7 +1,7 @@
 //@name calendar_diary
 //@display-name 달력
 //@api 3.0
-//@version 0.1.9
+//@version 0.2.0
 //@update-url https://raw.githubusercontent.com/hhja37984-AI/DaylifePlayroom/refs/heads/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
@@ -44,14 +44,53 @@
       const d = i - start + 1; return d >= 1 && d <= last ? dateKey(y, m, d) : null;
     });
   }
-  // A range is stored once, under its start date. Both endpoints are inclusive.
+  const DAY_MS = 86400000;
+  function dayNumber(key) { const p=parts(key); return utc(p.y,p.m,p.d).getTime()/DAY_MS; }
+  function fromDayNumber(n) {
+    const dt=new Date(n*DAY_MS), y=dt.getUTCFullYear();
+    return y>=1 && y<=9999 ? dateKey(y,dt.getUTCMonth()+1,dt.getUTCDate()) : null;
+  }
+  function normalizeRepeat(value, start, end) {
+    if (!value) return null;
+    const n=Number(value.interval), unit=value.unit;
+    const minDays={day:1,week:7,month:28,year:365};
+    if (!Object.hasOwn(minDays,unit) || !Number.isInteger(n) || n<1 || n>9999) throw new Error('반복 간격은 1~9999 사이의 정수로 지정해 주세요.');
+    if (dayNumber(end)-dayNumber(start)+1 > n*minDays[unit]) throw new Error('반복 간격은 일정 기간 이상이어야 해요.');
+    return {interval:n,unit};
+  }
+  function occurrenceStart(origin, repeat, key) {
+    if(!repeat) return origin;
+    const {interval:n,unit}=repeat;
+    if(unit==='day'||unit==='week') {
+      const step=n*(unit==='week'?7:1), delta=dayNumber(key)-dayNumber(origin);
+      return fromDayNumber(dayNumber(origin)+Math.floor(delta/step)*step);
+    }
+    const a=parts(origin), b=parts(key), base=a.y*12+a.m-1;
+    const step=n*(unit==='year'?12:1);
+    let k=Math.floor((b.y*12+b.m-1-base)/step);
+    const at=i=>{
+      const m=base+i*step, y=Math.floor(m/12), month=m%12+1;
+      return dateKey(y,month,Math.min(a.d,utc(y,month+1,0).getUTCDate()));
+    };
+    let candidate=at(k);
+    if(candidate>key && k>0) candidate=at(--k);
+    return candidate<=key?candidate:null;
+  }
+  function entryTitle(e, today) {
+    const delta=dayNumber(today)-dayNumber(e.startDate);
+    return e.title+(e.dday ? ' · '+(delta===0?'D-Day':delta<0?'D'+delta:'D+'+delta) : '')+(e.repeat?' ↻':'');
+  }
+  // Recurring dates are calculated on demand; only the series template is stored.
   function entriesOn(d, key) {
     const out = [];
-    for (const [startDate, day] of Object.entries(d?.days || {})) {
-      if (startDate > key) continue;
+    for (const [origin, day] of Object.entries(d?.days || {})) {
+      if (origin > key) continue;
       for (const entry of day.entries || []) {
-        const endDate = entry.endDate || startDate;
-        if (key <= endDate) out.push({...entry, startDate, endDate});
+        const duration=dayNumber(entry.endDate || origin)-dayNumber(origin);
+        const startDate=occurrenceStart(origin,entry.repeat,key);
+        if (!startDate || dayNumber(key)-dayNumber(startDate)>duration) continue;
+        const endDate=fromDayNumber(dayNumber(startDate)+duration)||'9999-12-31';
+        out.push({...entry, origin, startDate, endDate});
       }
     }
     return out.sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99') || a.startDate.localeCompare(b.startDate) || a.title.localeCompare(b.title));
@@ -215,7 +254,7 @@
     const entries = entriesOn(d,selected).map(e => {
       const id = 'diary-detail-' + bindings.length;
       bindings.push([id, () => openEditor(e.id)]);
-      const label = (e.done ? '✓ ' : '') + (e.time ? e.time + ' ' : '') + e.title + (e.endDate !== e.startDate ? ' · ' + e.startDate + ' ~ ' + e.endDate : '');
+      const label = (e.done ? '✓ ' : '') + (e.time ? e.time + ' ' : '') + entryTitle(e,d?.today || initialDate()) + (e.endDate !== e.startDate ? ' · ' + e.startDate + ' ~ ' + e.endDate : '');
       return '<button type="button" data-diary-action="' + id + '" style="' + buttonStyle + 'display:block;width:100%;text-align:left;padding:5px 0;border-bottom:1px solid #eee;overflow-wrap:anywhere;' + (e.done ? 'opacity:.65;text-decoration:line-through;' : '') + '">' + esc(label) + '</button>';
     }).join('');
     await detail.setInnerHTML(entries + (day.note ? '<div style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;font-size:12px;padding:6px 0">' + esc(day.note) + '</div>' : ''));
@@ -296,7 +335,7 @@
           const base = 'grid-row:1;grid-column:' + (col+1) + ';position:relative;min-width:0;box-sizing:border-box;border:.5px solid #ddd;';
           if (!key) return '<div style="' + base + 'background:#fafafa"></div>';
           const single = entriesOn(d,key).filter(e => e.startDate === e.endDate);
-          const labels = single.map(e => '<div style="font-size:11px;line-height:1.25;overflow-wrap:anywhere;letter-spacing:-.03em;' + (e.done ? 'text-decoration:line-through;opacity:.65;' : '') + '">' + esc(e.title) + '</div>').join('');
+          const labels = single.map(e => '<div style="font-size:11px;line-height:1.25;overflow-wrap:anywhere;letter-spacing:-.03em;' + (e.done ? 'text-decoration:line-through;opacity:.65;' : '') + '">' + esc(entryTitle(e,today)) + '</div>').join('');
           const note = d?.days?.[key]?.note;
           const cellStyle = buttonStyle + base + 'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;text-align:left;align-self:stretch;width:100%;padding:' + eventTop + 'px 3px 4px;';
           const background = key === today ? 'background:#edf5ff;' : 'background:#fff;';
@@ -307,7 +346,7 @@
         }).join('');
         const bars = ranges.bars.map(e => {
           const startsHere = wk[e.first] === e.startDate;
-          return '<div style="grid-row:1;grid-column:' + (e.first+1) + ' / ' + (e.last+2) + ';align-self:start;margin-top:' + (17+e.lane*15) + 'px;height:13px;line-height:13px;background:linear-gradient(to bottom,transparent 60%,rgba(86,160,244,.3) 60%);font-size:10px;padding-left:4px;min-width:0;overflow:hidden;white-space:nowrap;z-index:1;pointer-events:none;' + (e.done ? 'opacity:.55;text-decoration:line-through;' : '') + '">' + (startsHere || e.first === 0 || !wk[e.first-1] ? esc(e.title) : '') + '</div>';
+          return '<div style="grid-row:1;grid-column:' + (e.first+1) + ' / ' + (e.last+2) + ';align-self:start;margin-top:' + (17+e.lane*15) + 'px;height:13px;line-height:13px;background:linear-gradient(to bottom,transparent 60%,rgba(86,160,244,.3) 60%);font-size:10px;padding-left:4px;min-width:0;overflow:hidden;white-space:nowrap;z-index:1;pointer-events:none;' + (e.done ? 'opacity:.55;text-decoration:line-through;' : '') + '">' + (startsHere || e.first === 0 || !wk[e.first-1] ? esc(entryTitle(e,today)) : '') + '</div>';
         }).join('');
         weeks.push('<div style="position:relative;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:minmax(' + Math.max(70,eventTop+20) + 'px,auto)">' + cells + bars + '</div>');
       }
@@ -405,48 +444,93 @@
       days[key]={note:day.note,...(stickers.includes(day.sticker)?{sticker:day.sticker}:{}),entries:day.entries.map(e=>{
         if(typeof e.id!=='string' || !e.id || typeof e.title!=='string' || !e.title.trim() || e.title.length>200 || typeof e.body!=='string' || e.body.length>50000 || (e.time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(e.time))) throw new Error('백업 약속 형식이 올바르지 않아요.');
         const endDate = checkedEnd(key, e.endDate ?? key);
-        return {id:e.id,title:e.title,body:e.body,time:e.time||'',done:!!e.done,endDate};
+        return {id:e.id,title:e.title,body:e.body,time:e.time||'',done:!!e.done,endDate,dday:!!e.dday,repeat:normalizeRepeat(e.repeat,key,endDate)};
       })};
     }
     return {days};
+  }
+  function rangePicker(parent,start,end) {
+    const value={start,end};
+    let shown=start.slice(0,7)+'-01', anchor=null;
+    const wrap=el('div','',parent);
+    el('label','날짜 선택',wrap);
+    const summary=el('div','',wrap); summary.style.cssText='font-weight:600;margin:4px 0';
+    const nav=el('div','',wrap); nav.className='row'; nav.style.justifyContent='space-between';
+    const prev=el('button','‹',nav), heading=el('strong','',nav), next=el('button','›',nav);
+    const grid=el('div','',wrap);
+    grid.style.cssText='display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;text-align:center;margin-top:5px';
+    const clear=el('button','다시 선택',wrap); clear.style.marginTop='5px';
+    const hint=el('p','',wrap); hint.className='hint'; hint.style.margin='4px 0';
+    function paint() {
+      const p=parts(shown);
+      heading.textContent=p.y+'년 '+p.m+'월';
+      summary.textContent=value.start===value.end?value.start:value.start+' ~ '+value.end;
+      hint.textContent=anchor?'종료일을 선택하거나 하루 일정으로 저장하세요.':'날짜를 선택한 뒤 한 번 더 선택하면 기간 일정이 됩니다.';
+      grid.replaceChildren();
+      for(const w of '월화수목금토일') el('span',w,grid);
+      for(const key of monthCells(shown)) {
+        if(!key){el('span','',grid);continue;}
+        const btn=el('button',String(Number(key.slice(-2))),grid); btn.type='button';
+        btn.style.cssText='min-width:0;padding:7px 0;border:0;border-radius:4px;touch-action:manipulation';
+        if(key>=value.start&&key<=value.end) btn.style.background='#edf5ff';
+        if(key===value.start||key===value.end){btn.style.background='#2769a8';btn.style.color='#fff';}
+        btn.addEventListener('click',()=>{
+          if(anchor===null){anchor=key;value.start=value.end=key;}
+          else {value.start=key<anchor?key:anchor;value.end=key>anchor?key:anchor;anchor=null;}
+          paint();
+        });
+      }
+    }
+    prev.addEventListener('click',()=>{shown=shift(shown,-1,'month');paint();});
+    next.addEventListener('click',()=>{shown=shift(shown,1,'month');paint();});
+    clear.addEventListener('click',()=>{anchor= null;value.start=value.end=value.start;paint();});
+    paint(); return value;
   }
   async function openEditor(id) {
     if(!active()) return;
     const ctx=clone(context);
     const old=id ? entriesOn(diary(),selected).find(e=>e.id===id) : null;
-    const origin=old?.startDate || selected;
+    const origin=old?.origin || selected;
+    const template=old && diary()?.days?.[origin]?.entries?.find(e=>e.id===id);
+    const viewDate=selected;
     if(id && !old) throw new Error('약속을 찾지 못했어요.');
-    const entry=old ? clone(old) : {id:uid(),title:'',time:'',body:'',done:false};
+    const entry=old ? clone(template || old) : {id:uid(),title:'',time:'',body:'',done:false};
     const main=await shell(old ? '약속 편집' : '새 약속', true);
     el('p', `${ctx.name} · ${ctx.chatName}`, main).className='hint';
-    const date=field(main,'시작일','text',origin);
-    const end=field(main,'종료일','text',entry.endDate || origin);
-    date.placeholder=end.placeholder='YYYY-MM-DD';
-    el('p','시작일과 종료일을 모두 포함해요. 하루 일정은 두 날짜를 같게 지정하세요.',main).className='hint';
-    let previousStart=origin;
-    date.addEventListener('change',()=>{if(end.value===previousStart)end.value=date.value;previousStart=date.value;});
+    const dates=rangePicker(main,origin,entry.endDate || origin);
+    if(old?.repeat) el('p','반복 일정의 원본을 편집해요. 변경 및 완료 상태는 전체 반복 일정에 적용됩니다.',main).className='hint';
     const title=field(main,'제목','text',entry.title); title.maxLength=200;
     const time=field(main,'시간 · 선택','time',entry.time), body=field(main,'내용','textarea',entry.body); body.maxLength=50000;
+    const opts=el('div','',main);
+    const ddLabel=el('label','',opts), dd=el('input','',ddLabel); dd.type='checkbox'; dd.checked=!!entry.dday; ddLabel.appendChild(document.createTextNode('디데이 표시'));
+    const repeatLabel=el('label','',opts), repeating=el('input','',repeatLabel); repeating.type='checkbox'; repeating.checked=!!entry.repeat; repeatLabel.appendChild(document.createTextNode('반복'));
+    const repeatRow=el('div','',opts); repeatRow.className='row';
+    const interval=el('input','',repeatRow); interval.type='number'; interval.min='1'; interval.max='9999'; interval.step='1'; interval.value=entry.repeat?.interval || '1'; interval.style.width='70px';
+    const unit=el('select','',repeatRow);
+    for(const [value,label] of [['day','일'],['week','주'],['month','개월'],['year','년']]) {const opt=el('option',label,unit);opt.value=value;}
+    unit.value=entry.repeat?.unit || 'week'; el('span','마다 반복',repeatRow);
+    const syncRepeat=()=>{repeatRow.style.display=repeating.checked?'flex':'none';}; repeating.addEventListener('change',syncRepeat);syncRepeat();
     const label=el('label','',main), done=el('input','',label); done.type='checkbox'; done.checked=entry.done; label.appendChild(document.createTextNode('완료'));
     const row=el('div','',main); row.className='row';
     action(row,'저장',async()=>{
       await assertCurrent(ctx);
-      const endDate=checkedEnd(date.value,end.value);
+      const startDate=dates.start, endDate=checkedEnd(startDate,dates.end);
+      const repeat=normalizeRepeat(repeating.checked?{interval:interval.value,unit:unit.value}:null,startDate,endDate);
       if(!title.value.trim() || title.value.length>200 || body.value.length>50000) throw new Error('제목과 내용을 확인해 주세요.');
       if(time.value && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time.value)) throw new Error('시간을 확인해 주세요.');
       await update(next=>{
         const d=ensureDiary(next,ctx);
         if(old) d.days[origin].entries=d.days[origin].entries.filter(e=>e.id!==id);
-        const day=d.days[date.value] ||= {note:'',entries:[]};
-        day.entries.push({id:entry.id,title:title.value.trim(),time:time.value,body:body.value,done:done.checked,endDate});
+        const day=d.days[startDate] ||= {note:'',entries:[]};
+        day.entries.push({id:entry.id,title:title.value.trim(),time:time.value,body:body.value,done:done.checked,endDate,dday:dd.checked,repeat});
         day.entries.sort((a,b)=>(a.time||'99:99').localeCompare(b.time||'99:99'));
       });
-      selected=date.value; month=selected.slice(0,7)+'-01'; modal=false; await api.hideContainer(); document.body.replaceChildren(); await renderSide();
+      selected=old?.repeat && startDate===origin ? viewDate : startDate; month=selected.slice(0,7)+'-01'; modal=false; await api.hideContainer(); document.body.replaceChildren(); await renderSide();
     });
     if(old) {
       let confirm=false;
-      const remove=action(row,'약속 삭제',async()=>{
-        if(!confirm){confirm=true;remove.textContent='한 번 더 눌러 삭제';return;}
+      const remove=action(row,old.repeat?'반복 일정 전체 삭제':'약속 삭제',async()=>{
+        if(!confirm){confirm=true;remove.textContent=old.repeat?'한 번 더 눌러 전체 삭제':'한 번 더 눌러 삭제';return;}
         await assertCurrent(ctx);
         await update(next=>{const d=ensureDiary(next,ctx);d.days[origin].entries=d.days[origin].entries.filter(e=>e.id!==id);});
         modal=false;await api.hideContainer();document.body.replaceChildren();await renderSide();
