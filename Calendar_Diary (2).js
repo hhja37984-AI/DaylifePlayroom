@@ -1,7 +1,7 @@
 //@name calendar_diary
 //@display-name 달력
 //@api 3.0
-//@version 0.1.3
+//@version 0.1.4
 //@update-url https://github.com/hhja37984-AI/DaylifePlayroom/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
@@ -113,6 +113,11 @@
       if (modal) { modal = false; document.body.replaceChildren(); await api.hideContainer(); }
     }
     if (changed || force) await renderSide();
+    else if (active() && !modal) {
+      if (!rootDoc) rootDoc = await api.getRootDocument();
+      const mounted = rootDoc && await rootDoc.querySelector('[x-diary="' + ROOT + '"]');
+      if (!mounted || !root) await renderSide();
+    }
   }
   // Old chats may lack an ID. Assign one only on explicit activation, then verify.
   async function withStableChat(ctx) {
@@ -132,15 +137,16 @@
   }
   let detailListeners = [], cellStyles = new Map();
   async function clearDetails() {
-    for (const [el,id] of detailListeners) await el.removeEventListener('click',id);
-    detailListeners = [];
+    const old = detailListeners; detailListeners = [];
+    for (const [el,id] of old) { try { await el.removeEventListener('click',id); } catch (_) {} }
   }
   async function clearSide() {
     await clearDetails();
     cellStyles.clear();
-    for (const [el, id] of listeners) await el.removeEventListener('click', id);
-    listeners = [];
-    if (root) { await root.remove(); root = null; }
+    const old = listeners; listeners = [];
+    for (const [el,id] of old) { try { await el.removeEventListener('click',id); } catch (_) {} }
+    const oldRoot = root; root = null;
+    if (oldRoot) { try { await oldRoot.remove(); } catch (_) {} }
   }
   const buttonStyle = 'appearance:none;box-sizing:border-box;font:inherit;cursor:pointer;border:0;border-radius:0;background:transparent;color:inherit;padding:4px 6px;line-height:1.35;';
   const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -212,7 +218,7 @@
   async function renderSide() {
     await clearSide();
     if (!active()) return;
-    if (!rootDoc) rootDoc = await api.getRootDocument();
+    rootDoc = await api.getRootDocument();
     if (!rootDoc) {status('달력을 표시하려면 메인 화면 접근 권한이 필요합니다.', true); return;}
     const body = await rootDoc.querySelector('body'); if (!body) return;
     const old = await rootDoc.querySelector('[x-diary="' + ROOT + '"]'); if (old) await old.remove();
@@ -230,7 +236,7 @@
     const d = diary();
     let html;
     if (!expanded) {
-      html = b('달력', async () => { expanded = true; await renderSide(); }, 'background:#fff;border:1px solid #ddd;border-right:0;border-radius:4px 0 0 4px;padding:9px 7px;');
+      html = b('달력', async () => { expanded = true; await renderSide(); }, 'display:block;min-width:44px;min-height:36px;color:#333;background:#fff;border:1px solid #ddd;border-right:0;border-radius:4px 0 0 4px;padding:9px 7px;');
     } else {
       const p = parts(month), today = d?.today || initialDate();
       const nav = b('‹', async () => {month = shift(month, -1, 'month'); await renderSide();}, '', '이전 달') +
@@ -424,7 +430,7 @@
     }
     const registration=await api.registerSetting('달력',()=>work(openSettings),'📓','html','calendar-diary-settings');
     settingsId=registration?.id;
-    await refresh(true);
+    try { await refresh(true); } catch (error) { console.error('[Calendar Diary] Initial panel render',error); }
     let polling=false;
     timer=setInterval(()=>{if(polling||stopped)return;polling=true;work(probe).finally(()=>{polling=false;});},1500);
     await api.onUnload(async()=>{stopped=true;clearInterval(timer);await queue;await clearSide();if(settingsId)await api.unregisterUIPart(settingsId);});
