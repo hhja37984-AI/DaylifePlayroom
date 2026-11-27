@@ -1,7 +1,7 @@
 //@name calendar_diary
 //@display-name 달력
 //@api 3.0
-//@version 0.1.8
+//@version 0.1.9
 //@update-url https://raw.githubusercontent.com/hhja37984-AI/DaylifePlayroom/refs/heads/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
@@ -141,7 +141,7 @@
   async function clearMenu() {
     const old = menuListeners; menuListeners = [];
     for (const [el,id] of old) { try { await el.removeEventListener('click',id); } catch (_) {} }
-    const box = root && await root.querySelector('[x-diary-menu]');
+    const box = root && await root.querySelector('[data-diary-menu]');
     if (box) await box.setInnerHTML('');
   }
   async function clearDetails() {
@@ -205,8 +205,8 @@
   }
   async function renderSelectedDetails() {
     if (!root || !expanded) return;
-    const dateEl = await root.querySelector('[x-diary-selected]');
-    const detail = await root.querySelector('[x-diary-details]');
+    const dateEl = await root.querySelector('[data-diary-selected]');
+    const detail = await root.querySelector('[data-diary-details]');
     if (!dateEl || !detail) return;
     await clearDetails();
     await dateEl.setInnerHTML(esc(selected));
@@ -232,7 +232,7 @@
     selected = key;
     await renderSelectedDetails();
     await clearMenu();
-    const box = await root.querySelector('[x-diary-menu]');
+    const box = await root.querySelector('[data-diary-menu]');
     if (!box) return;
     const ctx = clone(context);
     const bindings = [];
@@ -301,7 +301,7 @@
           const cellStyle = buttonStyle + base + 'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;text-align:left;align-self:stretch;width:100%;padding:' + eventTop + 'px 3px 4px;';
           const background = key === today ? 'background:#edf5ff;' : 'background:#fff;';
           const dateStyle = key === today ? 'font-weight:700;color:#2769a8;' : '';
-          return '<button type="button" x-diary-date="' + esc(key) + '" aria-label="' + esc(key) + '" data-diary-action="' + bind(() => selectDate(key),key) + '" style="' + cellStyle + background + '">' +
+          return '<button type="button" data-diary-date="' + esc(key) + '" aria-label="' + esc(key) + '" data-diary-action="' + bind(() => selectDate(key),key) + '" style="' + cellStyle + background + '">' +
             '<span style="position:absolute;top:2px;left:4px;font-size:12px;' + dateStyle + '">' + Number(key.slice(-2)) + '</span>' +
             (d?.days?.[key]?.sticker ? '<span style="position:absolute;top:2px;right:3px;font-size:14px;pointer-events:none;">'+esc(d.days[key].sticker)+'</span>' : note ? '<span title="메모" style="position:absolute;top:2px;right:3px;font-size:11px;color:#999">·</span>' : '') + labels + '</button>';
         }).join('');
@@ -319,10 +319,10 @@
         b('⚙', () => openSettings(), '', '설정') +
         b('×', async () => {expanded = false; await renderSide();}, '', '접기') + '</header>' +
         '<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));text-align:center;font-size:12px;margin-bottom:3px">' + '월화수목금토일'.split('').map(w => '<span>' + w + '</span>').join('') + '</div>' +
-        '<div x-diary-grid="1">' + weeks.join('') + '</div><div x-diary-menu="1"></div>' +
-        '<div style="display:flex;align-items:center;gap:4px;margin-top:10px;border-bottom:1px solid #ddd;padding-bottom:4px"><strong x-diary-selected="1" style="flex:1;font-size:12px">' + esc(selected) + '</strong>' +
+        '<div data-diary-grid="1">' + weeks.join('') + '</div><div data-diary-menu="1"></div>' +
+        '<div style="display:flex;align-items:center;gap:4px;margin-top:10px;border-bottom:1px solid #ddd;padding-bottom:4px"><strong data-diary-selected="1" style="flex:1;font-size:12px">' + esc(selected) + '</strong>' +
         b('+ 일정', () => openEditor()) + b('메모', () => openNote()) + '</div>' +
-        '<div x-diary-details="1"></div>' +
+        '<div data-diary-details="1"></div>' +
         '</section>';
     }
     await root.setInnerHTML(html); await body.appendChild(root);
