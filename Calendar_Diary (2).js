@@ -2,7 +2,7 @@
 //@display-name 달력 · 작은 기록장
 //@api 3.0
 //@version 0.1.1
-//@link https://github.com/hhja37984-AI/Playroom/tree/main/Plugin%20V3/Calendar 사용 안내
+//@update-url https://github.com/hhja37984-AI/DaylifePlayroom/blob/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
  * Main-page UI uses SafeElement; editable forms stay in the plugin iframe.
