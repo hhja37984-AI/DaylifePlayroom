@@ -2,7 +2,7 @@
 //@display-name 달력
 //@api 3.0
 //@version 0.1.3
-//@update-url https://github.com/hhja37984-AI/DaylifePlayroom/blob/main/Calendar_Diary%20(2).js
+//@update-url https://github.com/hhja37984-AI/DaylifePlayroom/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
  * Main-page UI uses SafeElement; editable forms stay in the plugin iframe.
