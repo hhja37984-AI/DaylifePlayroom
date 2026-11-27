@@ -1,7 +1,7 @@
 //@name calendar_diary
 //@display-name 달력
 //@api 3.0
-//@version 0.2.0
+//@version 0.2.1
 //@update-url https://raw.githubusercontent.com/hhja37984-AI/DaylifePlayroom/refs/heads/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
@@ -454,24 +454,26 @@
     let shown=start.slice(0,7)+'-01', anchor=null;
     const wrap=el('div','',parent);
     el('label','날짜 선택',wrap);
-    const summary=el('div','',wrap); summary.style.cssText='font-weight:600;margin:4px 0';
-    const nav=el('div','',wrap); nav.className='row'; nav.style.justifyContent='space-between';
+    const summary=el('button','',wrap); summary.type='button'; summary.style.cssText='font-weight:600;margin:4px 0;padding:5px 0;background:transparent;border:0;text-align:left';
+    const popup=el('div','',wrap); popup.hidden=true; popup.style.cssText='padding:4px 0 8px';
+    summary.setAttribute('aria-expanded','false');
+    summary.addEventListener('click',()=>{popup.hidden=!popup.hidden;summary.setAttribute('aria-expanded',String(!popup.hidden));if(popup.hidden) anchor=null;paint();});
+    const nav=el('div','',popup); nav.className='row'; nav.style.justifyContent='space-between';
     const prev=el('button','‹',nav), heading=el('strong','',nav), next=el('button','›',nav);
-    const grid=el('div','',wrap);
+    for(const button of [prev,next]) {button.type='button';button.style.cssText='border:0;background:transparent;padding:5px 10px;font-size:18px';}
+    const grid=el('div','',popup);
     grid.style.cssText='display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;text-align:center;margin-top:5px';
-    const clear=el('button','다시 선택',wrap); clear.style.marginTop='5px';
-    const hint=el('p','',wrap); hint.className='hint'; hint.style.margin='4px 0';
+    const clear=el('button','다시 선택',popup); clear.type='button'; clear.style.cssText='margin-top:5px;background:transparent;border:0';
     function paint() {
       const p=parts(shown);
       heading.textContent=p.y+'년 '+p.m+'월';
-      summary.textContent=value.start===value.end?value.start:value.start+' ~ '+value.end;
-      hint.textContent=anchor?'종료일을 선택하거나 하루 일정으로 저장하세요.':'날짜를 선택한 뒤 한 번 더 선택하면 기간 일정이 됩니다.';
+      summary.textContent=(value.start===value.end?value.start:value.start+' ~ '+value.end)+(popup.hidden?' ▾':' ▴');
       grid.replaceChildren();
       for(const w of '월화수목금토일') el('span',w,grid);
       for(const key of monthCells(shown)) {
         if(!key){el('span','',grid);continue;}
         const btn=el('button',String(Number(key.slice(-2))),grid); btn.type='button';
-        btn.style.cssText='min-width:0;padding:7px 0;border:0;border-radius:4px;touch-action:manipulation';
+        btn.style.cssText='min-width:0;padding:7px 0;border:0;background:transparent;border-radius:4px;touch-action:manipulation';
         if(key>=value.start&&key<=value.end) btn.style.background='#edf5ff';
         if(key===value.start||key===value.end){btn.style.background='#2769a8';btn.style.color='#fff';}
         btn.addEventListener('click',()=>{
