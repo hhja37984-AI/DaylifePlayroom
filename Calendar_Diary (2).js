@@ -1,7 +1,7 @@
 //@name calendar_diary
 //@display-name 달력
 //@api 3.0
-//@version 0.1.7
+//@version 0.1.8
 //@update-url https://raw.githubusercontent.com/hhja37984-AI/DaylifePlayroom/refs/heads/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
@@ -135,9 +135,9 @@
     const saved = await api.getChatFromIndex(ctx.characterIndex, ctx.chatIndex);
     return {...ctx, chatId: saved.id};
   }
-  let detailListeners = [], menuListeners = [], pressTimer = null, pressedKey = '', suppressUntil = 0;
+  let detailListeners = [], menuListeners = [], lastTapKey = '', lastTapAt = 0;
   const stickers = ['🌙','☀️','⭐','🎂','⚓','✉️','❤️','🌹','🍷','🎁','⚔️','🏛️'];
-  function cancelPress() { clearTimeout(pressTimer); pressTimer = null; pressedKey = ''; }
+  function resetTap() { lastTapKey = ''; lastTapAt = 0; }
   async function clearMenu() {
     const old = menuListeners; menuListeners = [];
     for (const [el,id] of old) { try { await el.removeEventListener('click',id); } catch (_) {} }
@@ -150,7 +150,7 @@
   }
   async function clearSide() {
     await clearDetails();
-    cancelPress();
+    resetTap();
     await clearMenu();
     const old = listeners; listeners = [];
     for (const [el,id,type] of old) { try { await el.removeEventListener(type || 'click',id); } catch (_) {} }
@@ -183,14 +183,24 @@
     return {bars, count:lanes.length};
   }
   async function attachSideBindings(scope, bindings, target) {
-    await Promise.all(bindings.map(async ([id, callback]) => {
+    await Promise.all(bindings.map(async ([id, callback, dayKey]) => {
       const el = await scope.querySelector('[data-diary-action="' + id + '"]');
-      if (el) target.push([el, await el.addEventListener('click', () => work(async () => {
-        const before = signature(context);
+      if (el) target.push([el, await el.addEventListener('click', () => {
         const panel = root;
-        await refresh();
-        if (before === signature(context) && active() && panel === root) await callback();
-      }))]);
+        const now = Date.now();
+        const doubleTap = !!dayKey && lastTapKey === dayKey && now-lastTapAt <= 450;
+        if (!dayKey || doubleTap) resetTap();
+        else { lastTapKey = dayKey; lastTapAt = now; }
+        return work(async () => {
+          if (panel !== root) return;
+          const before = signature(context);
+          await refresh();
+          if (before === signature(context) && active() && panel === root) {
+            if (doubleTap) await showDayMenu(dayKey);
+            else await callback();
+          }
+        });
+      })]);
     }));
   }
   async function renderSelectedDetails() {
@@ -212,7 +222,6 @@
     await attachSideBindings(detail,bindings,detailListeners);
   }
   async function selectDate(key) {
-    if (Date.now() < suppressUntil) return;
     await clearMenu();
     if (key === selected) return;
     selected = key;
@@ -250,48 +259,6 @@
       '</div>');
     await attachSideBindings(box,bindings,menuListeners);
   }
-  async function attachPressBindings() {
-    const panel = root;
-    const keys = monthCells(month).filter(Boolean);
-    let lastMenuKey = '', lastMenuAt = 0;
-    function trigger(key) {
-      cancelPress();
-      if (panel !== root || !expanded) return;
-      const now = Date.now();
-      if (lastMenuKey === key && now-lastMenuAt < 900) return;
-      lastMenuKey = key; lastMenuAt = now;
-      suppressUntil = now+1200;
-      work(async () => {
-        if (panel !== root || !expanded || !active()) return;
-        const before = signature(context);
-        await refresh();
-        if (panel === root && before === signature(context) && active()) await showDayMenu(key);
-      });
-    }
-    async function on(el,type,fn) {
-      try {
-        const id = await el.addEventListener(type,fn);
-        listeners.push([el,id,type]);
-      } catch(error) { console.warn('[Calendar Diary] Gesture event unavailable:',type,error); }
-    }
-    await Promise.all(keys.map(async key => {
-      const cell = await panel.querySelector('[x-diary-date="'+key+'"]');
-      if (!cell) return;
-      // Native contextmenu covers desktop right click and browser-generated
-      // mobile long press. Touch events supply a timer fallback.
-      await on(cell,'contextmenu',event => {
-        try { event?.preventDefault?.(); } catch (_) {}
-        trigger(key);
-      });
-      await on(cell,'touchstart',() => {
-        cancelPress(); pressedKey=key;
-        pressTimer=setTimeout(()=>{if(pressedKey===key) trigger(key);},550);
-      });
-      await on(cell,'touchend',cancelPress);
-      await on(cell,'touchcancel',cancelPress);
-      await on(cell,'touchmove',cancelPress);
-    }));
-  }
   async function renderSide() {
     await clearSide();
     if (!active()) return;
@@ -303,9 +270,9 @@
     await root.setAttribute('x-diary', ROOT);
     await root.setStyleAttribute('position:fixed;right:0;top:14%;z-index:800;font:13px/1.35 sans-serif;color:#333;box-sizing:border-box;');
     const bindings = [];
-    function bind(action) {
+    function bind(action, dayKey = '') {
       const id = 'diary-action-' + bindings.length;
-      bindings.push([id, action]); return id;
+      bindings.push([id, action, dayKey]); return id;
     }
     function b(label, action, extra = '', title = '') {
       return '<button type="button" data-diary-action="' + bind(action) + '" style="' + buttonStyle + extra + '"' + (title ? ' title="' + esc(title) + '" aria-label="' + esc(title) + '"' : '') + '>' + esc(label) + '</button>';
@@ -331,10 +298,10 @@
           const single = entriesOn(d,key).filter(e => e.startDate === e.endDate);
           const labels = single.map(e => '<div style="font-size:11px;line-height:1.25;overflow-wrap:anywhere;letter-spacing:-.03em;' + (e.done ? 'text-decoration:line-through;opacity:.65;' : '') + '">' + esc(e.title) + '</div>').join('');
           const note = d?.days?.[key]?.note;
-          const cellStyle = buttonStyle + base + 'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y;text-align:left;align-self:stretch;width:100%;padding:' + eventTop + 'px 3px 4px;';
+          const cellStyle = buttonStyle + base + 'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;text-align:left;align-self:stretch;width:100%;padding:' + eventTop + 'px 3px 4px;';
           const background = key === today ? 'background:#edf5ff;' : 'background:#fff;';
           const dateStyle = key === today ? 'font-weight:700;color:#2769a8;' : '';
-          return '<button type="button" x-diary-date="' + esc(key) + '" aria-label="' + esc(key) + '" data-diary-action="' + bind(() => selectDate(key)) + '" style="' + cellStyle + background + '">' +
+          return '<button type="button" x-diary-date="' + esc(key) + '" aria-label="' + esc(key) + '" data-diary-action="' + bind(() => selectDate(key),key) + '" style="' + cellStyle + background + '">' +
             '<span style="position:absolute;top:2px;left:4px;font-size:12px;' + dateStyle + '">' + Number(key.slice(-2)) + '</span>' +
             (d?.days?.[key]?.sticker ? '<span style="position:absolute;top:2px;right:3px;font-size:14px;pointer-events:none;">'+esc(d.days[key].sticker)+'</span>' : note ? '<span title="메모" style="position:absolute;top:2px;right:3px;font-size:11px;color:#999">·</span>' : '') + labels + '</button>';
         }).join('');
@@ -360,7 +327,7 @@
     }
     await root.setInnerHTML(html); await body.appendChild(root);
     await attachSideBindings(root,bindings,listeners);
-    if (expanded) { await renderSelectedDetails(); await attachPressBindings(); }
+    if (expanded) await renderSelectedDetails();
   }
   const css = `*{box-sizing:border-box}body{margin:0;background:transparent;color:#333;font:13px/1.45 sans-serif;padding:0}main{background:#fff;max-width:620px;margin:auto;padding:12px}body.diary-compact main{position:fixed;right:0;top:14%;width:min(350px,calc(100vw - 18px));max-height:74dvh;overflow:auto;overscroll-behavior:contain;border:1px solid #ddd;border-right:0;border-radius:4px 0 0 4px;padding:12px}h1{font-size:18px;margin:0}h2{font-size:15px}header,.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}header h1{flex:1}section{padding:10px;border:1px solid #ddd;margin-top:12px;background:#fff}label{display:block;margin:10px 0 4px}input,textarea,select,button{font:inherit;color:inherit;border:1px solid #ddd;border-radius:4px;padding:6px;background:#fff}input:not([type=checkbox]),textarea{width:100%}textarea{min-height:100px;resize:vertical}button{cursor:pointer;background:#f5f5f5}button:disabled{opacity:.45;cursor:default}input[type=checkbox]{width:16px;height:16px;vertical-align:middle;margin-right:6px}.hint{font-size:11px;color:#777;white-space:pre-wrap;overflow-wrap:anywhere}.danger{color:#a33}#diary-status{white-space:pre-wrap}#diary-status:empty{display:none}`;
   function el(tag, text, parent) { const n = document.createElement(tag); if (text) n.textContent = text; if(parent) parent.appendChild(n); return n; }
