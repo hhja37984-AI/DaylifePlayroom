@@ -1,7 +1,7 @@
 //@name calendar_diary
 //@display-name 달력
 //@api 3.0
-//@version 0.1.5
+//@version 0.1.6
 //@update-url https://raw.githubusercontent.com/hhja37984-AI/DaylifePlayroom/refs/heads/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
@@ -73,7 +73,7 @@
   };
   function status(message, error = false) {
     const target = document.getElementById('diary-status');
-    if (target) { target.textContent = message; target.style.color = error ? '#ffada4' : '#bad8c7'; }
+    if (target) { target.textContent = message; target.style.color = error ? '#a33' : '#356c45'; }
   }
   async function update(mutator) {
     const next = clone(state); mutator(next);
@@ -135,16 +135,25 @@
     const saved = await api.getChatFromIndex(ctx.characterIndex, ctx.chatIndex);
     return {...ctx, chatId: saved.id};
   }
-  let detailListeners = [], selectionWeeks = new Map();
+  let detailListeners = [], menuListeners = [], pressTimer = null, pressedKey = '', suppressUntil = 0;
+  const stickers = ['🌙','☀️','⭐','🎂','⚓','✉️','❤️','🌹','🍷','🎁','⚔️','🏛️'];
+  function cancelPress() { clearTimeout(pressTimer); pressTimer = null; pressedKey = ''; }
+  async function clearMenu() {
+    const old = menuListeners; menuListeners = [];
+    for (const [el,id] of old) { try { await el.removeEventListener('click',id); } catch (_) {} }
+    const box = root && await root.querySelector('[x-diary-menu]');
+    if (box) await box.setInnerHTML('');
+  }
   async function clearDetails() {
     const old = detailListeners; detailListeners = [];
     for (const [el,id] of old) { try { await el.removeEventListener('click',id); } catch (_) {} }
   }
   async function clearSide() {
     await clearDetails();
-    selectionWeeks.clear();
+    cancelPress();
+    await clearMenu();
     const old = listeners; listeners = [];
-    for (const [el,id] of old) { try { await el.removeEventListener('click',id); } catch (_) {} }
+    for (const [el,id,type] of old) { try { await el.removeEventListener(type || 'click',id); } catch (_) {} }
     const oldRoot = root; root = null;
     if (oldRoot) { try { await oldRoot.remove(); } catch (_) {} }
   }
@@ -202,24 +211,70 @@
     await detail.setInnerHTML(entries + (day.note ? '<div style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;font-size:12px;padding:6px 0">' + esc(day.note) + '</div>' : ''));
     await attachSideBindings(detail,bindings,detailListeners);
   }
-  function selectionLayer(key, week) {
-    const position = selectionWeeks.get(key);
-    if (!position || position.week !== week) return '';
-    return '<div style="position:absolute;top:0;bottom:0;left:' + (position.col*100/7) + '%;width:' + (100/7) + '%;background:rgba(86,160,244,.14);pointer-events:none;box-sizing:border-box;"></div>';
-  }
   async function selectDate(key) {
+    if (Date.now() < suppressUntil) return;
+    await clearMenu();
     if (key === selected) return;
-    const previous = selectionWeeks.get(selected);
     selected = key;
-    if (!root || !expanded) return;
-    const current = selectionWeeks.get(key);
-    const affected = new Set([previous?.week,current?.week]);
-    for (const week of affected) {
-      if (week === undefined) continue;
-      const layer = await root.querySelector('[x-diary-selection="' + week + '"]');
-      if (layer) await layer.setInnerHTML(selectionLayer(selected,week));
-    }
     await renderSelectedDetails();
+  }
+  async function showDayMenu(key) {
+    if (!root || !expanded || modal) return;
+    selected = key;
+    await renderSelectedDetails();
+    await clearMenu();
+    const box = await root.querySelector('[x-diary-menu]');
+    if (!box) return;
+    const ctx = clone(context);
+    const bindings = [];
+    function item(label, callback, style='') {
+      const id = 'diary-menu-' + bindings.length;
+      bindings.push([id,callback]);
+      return '<button type="button" data-diary-action="'+id+'" style="'+buttonStyle+style+'">'+esc(label)+'</button>';
+    }
+    async function saveSticker(value) {
+      await assertCurrent(ctx);
+      await update(next => {
+        const day = ensureDiary(next,ctx).days[key] ||= {entries:[],note:''};
+        if (value) day.sticker = value; else delete day.sticker;
+      });
+      await renderSide();
+    }
+    const chosen = diary()?.days?.[key]?.sticker;
+    const icons = stickers.map(icon=>item(icon,()=>saveSticker(icon),'font-size:19px;border:1px solid #ddd;border-radius:4px;padding:4px;'+(chosen===icon?'background:#edf5ff;':''))).join('');
+    await box.setInnerHTML('<div style="position:absolute;right:8px;left:8px;top:38px;z-index:5;background:#fff;border:1px solid #ddd;border-radius:6px;padding:10px;box-shadow:0 3px 12px #0002;box-sizing:border-box;">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:8px"><strong>'+esc(key)+'</strong>'+item('×',clearMenu)+'</div>'+
+      '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">'+icons+item('−',()=>saveSticker(''),'border:1px solid #ddd;border-radius:4px;')+'</div>'+
+      item('+ 일정',async()=>{await clearMenu();await openEditor();},'display:block;text-align:left;width:100%;padding:8px 0;')+
+      item('메모',async()=>{await clearMenu();await openNote();},'display:block;text-align:left;width:100%;padding:8px 0;')+
+      '</div>');
+    await attachSideBindings(box,bindings,menuListeners);
+  }
+  async function attachPressBindings() {
+    // One set of listeners per calendar grid, not four listeners per date.
+    const grid = await root.querySelector('[x-diary-grid]');
+    if (!grid) return;
+    // SafeElement event payloads may not expose a target element. Each cell
+    // gets a pointerdown listener; release/cancel is shared on the grid.
+    const keys = monthCells(month).filter(Boolean);
+    await Promise.all(keys.map(async key=>{
+      const cell = await root.querySelector('[x-diary-date="'+key+'"]');
+      if (!cell) return;
+      const id = await cell.addEventListener('pointerdown',()=>{
+        cancelPress(); pressedKey=key;
+        const panel=root;
+        pressTimer=setTimeout(()=>{
+          if(pressedKey!==key || panel!==root) return;
+          suppressUntil=Date.now()+1000;
+          work(async()=>{if(panel===root && expanded && active()) await showDayMenu(key);});
+        },500);
+      });
+      listeners.push([cell,id,'pointerdown']);
+    }));
+    for(const type of ['pointerup','pointercancel','pointerleave','scroll']) {
+      const id=await grid.addEventListener(type,cancelPress);
+      listeners.push([grid,id,type]);
+    }
   }
   async function renderSide() {
     await clearSide();
@@ -260,19 +315,18 @@
           const single = entriesOn(d,key).filter(e => e.startDate === e.endDate);
           const labels = single.map(e => '<div style="font-size:11px;line-height:1.25;overflow-wrap:anywhere;letter-spacing:-.03em;' + (e.done ? 'text-decoration:line-through;opacity:.65;' : '') + '">' + esc(e.title) + '</div>').join('');
           const note = d?.days?.[key]?.note;
-          const cellStyle = buttonStyle + base + 'text-align:left;align-self:stretch;width:100%;padding:' + eventTop + 'px 3px 4px;';
-          selectionWeeks.set(key,{week:i/7,col});
-          const background = 'background:#fff;';
+          const cellStyle = buttonStyle + base + 'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y;text-align:left;align-self:stretch;width:100%;padding:' + eventTop + 'px 3px 4px;';
+          const background = key === today ? 'background:#edf5ff;' : 'background:#fff;';
           const dateStyle = key === today ? 'font-weight:700;color:#2769a8;' : '';
           return '<button type="button" x-diary-date="' + esc(key) + '" aria-label="' + esc(key) + '" data-diary-action="' + bind(() => selectDate(key)) + '" style="' + cellStyle + background + '">' +
             '<span style="position:absolute;top:2px;left:4px;font-size:12px;' + dateStyle + '">' + Number(key.slice(-2)) + '</span>' +
-            (note ? '<span title="메모" style="position:absolute;top:2px;right:3px;font-size:11px;color:#999">·</span>' : '') + labels + '</button>';
+            (d?.days?.[key]?.sticker ? '<span style="position:absolute;top:2px;right:3px;font-size:14px;pointer-events:none;">'+esc(d.days[key].sticker)+'</span>' : note ? '<span title="메모" style="position:absolute;top:2px;right:3px;font-size:11px;color:#999">·</span>' : '') + labels + '</button>';
         }).join('');
         const bars = ranges.bars.map(e => {
           const startsHere = wk[e.first] === e.startDate;
           return '<div style="grid-row:1;grid-column:' + (e.first+1) + ' / ' + (e.last+2) + ';align-self:start;margin-top:' + (17+e.lane*15) + 'px;height:13px;line-height:13px;background:linear-gradient(to bottom,transparent 60%,rgba(86,160,244,.3) 60%);font-size:10px;padding-left:4px;min-width:0;overflow:hidden;white-space:nowrap;z-index:1;pointer-events:none;' + (e.done ? 'opacity:.55;text-decoration:line-through;' : '') + '">' + (startsHere || e.first === 0 || !wk[e.first-1] ? esc(e.title) : '') + '</div>';
         }).join('');
-        weeks.push('<div style="position:relative;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:minmax(' + Math.max(70,eventTop+20) + 'px,auto)">' + cells + bars + '<div x-diary-selection="' + (i/7) + '" style="position:absolute;inset:0;z-index:2;pointer-events:none;">' + selectionLayer(selected,i/7) + '</div></div>');
+        weeks.push('<div style="position:relative;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:minmax(' + Math.max(70,eventTop+20) + 'px,auto)">' + cells + bars + '</div>');
       }
       html = b('', async () => {expanded = false; await renderSide();}, 'position:fixed;inset:0;width:100vw;height:100dvh;padding:0;background:transparent;z-index:0;', '달력 바깥을 눌러 닫기') +
         '<section style="position:relative;z-index:1;width:min(350px,calc(100vw - 18px));max-height:74dvh;overflow:auto;overscroll-behavior:contain;background:#fff;border:1px solid #ddd;border-right:0;border-radius:4px 0 0 4px;padding:8px;box-sizing:border-box;color:#333;">' +
@@ -282,7 +336,7 @@
         b('⚙', () => openSettings(), '', '설정') +
         b('×', async () => {expanded = false; await renderSide();}, '', '접기') + '</header>' +
         '<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));text-align:center;font-size:12px;margin-bottom:3px">' + '월화수목금토일'.split('').map(w => '<span>' + w + '</span>').join('') + '</div>' +
-        weeks.join('') +
+        '<div x-diary-grid="1">' + weeks.join('') + '</div><div x-diary-menu="1"></div>' +
         '<div style="display:flex;align-items:center;gap:4px;margin-top:10px;border-bottom:1px solid #ddd;padding-bottom:4px"><strong x-diary-selected="1" style="flex:1;font-size:12px">' + esc(selected) + '</strong>' +
         b('+ 일정', () => openEditor()) + b('메모', () => openNote()) + '</div>' +
         '<div x-diary-details="1"></div>' +
@@ -290,9 +344,9 @@
     }
     await root.setInnerHTML(html); await body.appendChild(root);
     await attachSideBindings(root,bindings,listeners);
-    if (expanded) await renderSelectedDetails();
+    if (expanded) { await renderSelectedDetails(); await attachPressBindings(); }
   }
-  const css = `*{box-sizing:border-box}body{margin:0;background:#191b1a;color:#ecece5;font:15px/1.6 system-ui,sans-serif;padding:18px}main{max-width:620px;margin:auto}h1{font-size:21px;margin:0}h2{font-size:17px}header,.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}header h1{flex:1}section{padding:16px;border:1px solid #485149;border-radius:14px;margin-top:18px;background:#222723}label{display:block;margin:14px 0 5px}input,textarea,select,button{font:inherit;color:inherit;border:1px solid #626d60;border-radius:8px;padding:10px;background:#161b17}input:not([type=checkbox]),textarea{width:100%}textarea{min-height:160px;resize:vertical}button{cursor:pointer;background:#354236}button:disabled{opacity:.45;cursor:default}input[type=checkbox]{width:20px;height:20px;vertical-align:middle;margin-right:8px}.hint{font-size:13px;color:#b9c4b6;white-space:pre-wrap;overflow-wrap:anywhere}.danger{background:#50362f}#diary-status{min-height:1.6em;white-space:pre-wrap}`;
+  const css = `*{box-sizing:border-box}body{margin:0;background:transparent;color:#333;font:13px/1.45 sans-serif;padding:0}main{background:#fff;max-width:620px;margin:auto;padding:12px}body.diary-compact main{position:fixed;right:0;top:14%;width:min(350px,calc(100vw - 18px));max-height:74dvh;overflow:auto;overscroll-behavior:contain;border:1px solid #ddd;border-right:0;border-radius:4px 0 0 4px;padding:12px}h1{font-size:18px;margin:0}h2{font-size:15px}header,.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}header h1{flex:1}section{padding:10px;border:1px solid #ddd;margin-top:12px;background:#fff}label{display:block;margin:10px 0 4px}input,textarea,select,button{font:inherit;color:inherit;border:1px solid #ddd;border-radius:4px;padding:6px;background:#fff}input:not([type=checkbox]),textarea{width:100%}textarea{min-height:100px;resize:vertical}button{cursor:pointer;background:#f5f5f5}button:disabled{opacity:.45;cursor:default}input[type=checkbox]{width:16px;height:16px;vertical-align:middle;margin-right:6px}.hint{font-size:11px;color:#777;white-space:pre-wrap;overflow-wrap:anywhere}.danger{color:#a33}#diary-status{white-space:pre-wrap}#diary-status:empty{display:none}`;
   function el(tag, text, parent) { const n = document.createElement(tag); if (text) n.textContent = text; if(parent) parent.appendChild(n); return n; }
   function field(parent, label, kind, value = '') {
     const wrap = el('label', label, parent); const n = el(kind === 'textarea' ? 'textarea' : 'input', '', wrap);
@@ -303,8 +357,9 @@
     const n = el('button', label, parent); n.type = 'button'; n.className = className;
     n.addEventListener('click', () => {n.disabled = true; work(callback).finally(() => {n.disabled = false;});}); return n;
   }
-  async function shell(title) {
+  async function shell(title, compact = false) {
     document.body.replaceChildren();
+    document.body.classList.toggle('diary-compact', compact);
     let style = document.getElementById('calendar-diary-style');
     if (!style) {style = el('style', '', document.head); style.id = 'calendar-diary-style'; style.textContent = css;}
     const main = el('main', '', document.body), header = el('header', '', main);
@@ -352,6 +407,7 @@
       const stable=await withStableChat(ctx);
       await update(next => {const d=ensureDiary(next, stable); for (const [key, value] of Object.entries(imported.days)) {
         const target=d.days[key] ||= {note:'',entries:[]};
+        if (value.sticker && !target.sticker) target.sticker = value.sticker;
         if (value.note && target.note !== value.note) target.note = target.note ? target.note+'\n\n'+value.note : value.note;
         for(const e of value.entries) {const i=target.entries.findIndex(x=>x.id===e.id); if(i<0) target.entries.push(e);}
       }});
@@ -363,7 +419,7 @@
     const days={};
     for(const [key, day] of Object.entries(input.diary.days)) {
       if(!parts(key) || typeof day.note!=='string' || !Array.isArray(day.entries) || day.note.length>50000) throw new Error('백업 날짜 또는 메모 형식이 올바르지 않아요.');
-      days[key]={note:day.note,entries:day.entries.map(e=>{
+      days[key]={note:day.note,...(stickers.includes(day.sticker)?{sticker:day.sticker}:{}),entries:day.entries.map(e=>{
         if(typeof e.id!=='string' || !e.id || typeof e.title!=='string' || !e.title.trim() || e.title.length>200 || typeof e.body!=='string' || e.body.length>50000 || (e.time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(e.time))) throw new Error('백업 약속 형식이 올바르지 않아요.');
         const endDate = checkedEnd(key, e.endDate ?? key);
         return {id:e.id,title:e.title,body:e.body,time:e.time||'',done:!!e.done,endDate};
@@ -378,7 +434,7 @@
     const origin=old?.startDate || selected;
     if(id && !old) throw new Error('약속을 찾지 못했어요.');
     const entry=old ? clone(old) : {id:uid(),title:'',time:'',body:'',done:false};
-    const main=await shell(old ? '약속 편집' : '새 약속');
+    const main=await shell(old ? '약속 편집' : '새 약속', true);
     el('p', `${ctx.name} · ${ctx.chatName}`, main).className='hint';
     const date=field(main,'시작일','text',origin);
     const end=field(main,'종료일','text',entry.endDate || origin);
@@ -417,7 +473,7 @@
   async function openNote() {
     if(!active()) return;
     const ctx=clone(context), date=selected;
-    const main=await shell('하루 메모'); el('p',`${ctx.name} · ${date}`,main).className='hint';
+    const main=await shell('하루 메모', true); el('p',`${ctx.name} · ${date}`,main).className='hint';
     const note=field(main,'메모','textarea',diary()?.days?.[date]?.note||''); note.maxLength=50000;
     action(main,'저장',async()=>{await assertCurrent(ctx);if(note.value.length>50000)throw new Error('메모는 50,000자까지 저장할 수 있어요.');await update(next=>{const day=ensureDiary(next,ctx).days[date] ||= {entries:[],note:''};day.note=note.value;});modal=false;await api.hideContainer();document.body.replaceChildren();await renderSide();});
   }
