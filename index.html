@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calendar Design Playground</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; padding: 12px; font: 14px system-ui, sans-serif; }
+iframe { display: block; width: 100%; height: 420px; border: 1px solid #aaa; }
+.editors { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 12px; }
+label { display: block; margin-bottom: 4px; }
+textarea { display: block; width: 100%; height: 340px; resize: vertical; font: 13px monospace; tab-size: 2; }
+@media(max-width: 600px) { .editors { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<iframe id="preview" title="Calendar preview" sandbox=""></iframe>
+<div class="editors">
+  <div><label for="html">HTML</label><textarea id="html" spellcheck="false"></textarea></div>
+  <div><label for="css">CSS</label><textarea id="css" spellcheck="false"></textarea></div>
+</div>
+<script>
+const html = document.getElementById('html');
+const css = document.getElementById('css');
+const preview = document.getElementById('preview');
+html.value = "<section class=\"calendar\">\n  <h2>February</h2>\n  <div class=\"days\">\n    <div class=\"day\">\n      <span class=\"date\">1</span>\n      <span class=\"temperature\">9°C</span>\n      <span class=\"weather\">☀</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">2</span>\n      <span class=\"temperature\">10°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">3</span>\n      <span class=\"temperature\">8°C</span>\n      <span class=\"weather\">☂</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">4</span>\n      <span class=\"temperature\">12°C</span>\n      <span class=\"weather\">☀</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">5</span>\n      <span class=\"temperature\">11°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">6</span>\n      <span class=\"temperature\">9°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">7</span>\n      <span class=\"temperature\">7°C</span>\n      <span class=\"weather\">☂</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">8</span>\n      <span class=\"temperature\">9°C</span>\n      <span class=\"weather\">☀</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">9</span>\n      <span class=\"temperature\">10°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">10</span>\n      <span class=\"temperature\">8°C</span>\n      <span class=\"weather\">☂</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">11</span>\n      <span class=\"temperature\">12°C</span>\n      <span class=\"weather\">☀</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">12</span>\n      <span class=\"temperature\">11°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">13</span>\n      <span class=\"temperature\">9°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">14</span>\n      <span class=\"temperature\">7°C</span>\n      <span class=\"weather\">☂</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">15</span>\n      <span class=\"temperature\">9°C</span>\n      <span class=\"weather\">☀</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">16</span>\n      <span class=\"temperature\">10°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">17</span>\n      <span class=\"temperature\">8°C</span>\n      <span class=\"weather\">☂</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">18</span>\n      <span class=\"temperature\">12°C</span>\n      <span class=\"weather\">☀</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">19</span>\n      <span class=\"temperature\">11°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">20</span>\n      <span class=\"temperature\">9°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">21</span>\n      <span class=\"temperature\">7°C</span>\n      <span class=\"weather\">☂</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">22</span>\n      <span class=\"temperature\">9°C</span>\n      <span class=\"weather\">☀</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">23</span>\n      <span class=\"temperature\">10°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">24</span>\n      <span class=\"temperature\">8°C</span>\n      <span class=\"weather\">☂</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">25</span>\n      <span class=\"temperature\">12°C</span>\n      <span class=\"weather\">☀</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">26</span>\n      <span class=\"temperature\">11°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">27</span>\n      <span class=\"temperature\">9°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">28</span>\n      <span class=\"temperature\">7°C</span>\n      <span class=\"weather\">☂</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">29</span>\n      <span class=\"temperature\">9°C</span>\n      <span class=\"weather\">☀</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">30</span>\n      <span class=\"temperature\">10°C</span>\n      <span class=\"weather\">☁</span>\n    </div>\n    <div class=\"day\">\n      <span class=\"date\">31</span>\n      <span class=\"temperature\">8°C</span>\n      <span class=\"weather\">☂</span>\n    </div>\n  </div>\n</section>";
+css.value = ".calendar {\n  width: 100%;\n}\n.calendar h2 {\n  margin: 0 0 12px;\n}\n.days {\n  display: grid;\n  grid-template-columns: repeat(7, minmax(0, 1fr));\n  grid-template-rows: repeat(5, minmax(64px, auto));\n  gap: 0;\n}\n.day {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  min-width: 0;\n  border: 1px solid #ccc;\n  padding: 4px;\n}\n.date { font-size: 14px; }\n.temperature { font-size: 12px; }\n.weather { font-size: 18px; }";
+function render() {
+  preview.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html{box-sizing:border-box}*,*::before,*::after{box-sizing:inherit}body{margin:8px}</style><style>' + css.value + '</style></head><body>' + html.value + '</body></html>';
+}
+html.addEventListener('input', render);
+css.addEventListener('input', render);
+render();
+</script>
+</body>
+</html>
