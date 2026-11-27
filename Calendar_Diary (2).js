@@ -1,7 +1,7 @@
 //@name calendar_diary
-//@display-name 달력 · 작은 기록장
+//@display-name 달력
 //@api 3.0
-//@version 0.1.1
+//@version 0.1.2
 //@update-url https://github.com/hhja37984-AI/DaylifePlayroom/blob/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
@@ -38,7 +38,7 @@
   function initialDate() { const n = new Date(); return dateKey(n.getFullYear(), n.getMonth() + 1, n.getDate()); }
   function monthCells(value) {
     const {y, m} = parts(value);
-    const start = utc(y, m, 1).getUTCDay();
+    const start = (utc(y, m, 1).getUTCDay() + 6) % 7;
     const last = utc(y, m + 1, 0).getUTCDate();
     return Array.from({length: Math.ceil((start + last) / 7) * 7}, (_, i) => {
       const d = i - start + 1; return d >= 1 && d <= last ? dateKey(y, m, d) : null;
@@ -135,51 +135,97 @@
     listeners = [];
     if (root) { await root.remove(); root = null; }
   }
-  const buttonStyle = 'appearance:none;box-sizing:border-box;font:inherit;cursor:pointer;border:1px solid #655f53;border-radius:8px;background:#302e29;color:#f3eddf;padding:7px 9px;line-height:1.35;';
+  const buttonStyle = 'appearance:none;box-sizing:border-box;font:inherit;cursor:pointer;border:0;border-radius:0;background:transparent;color:inherit;padding:4px 6px;line-height:1.35;';
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  // Each week has seven explicitly positioned cells. Range bars overlap those
+  // same grid tracks and use separate lanes when their dates overlap.
+  function weekRanges(d, keys) {
+    const seen = new Map();
+    keys.forEach((key, col) => {
+      if (!key) return;
+      for (const e of entriesOn(d, key)) {
+        if (e.startDate === e.endDate) continue;
+        const id = e.startDate + ':' + e.id;
+        if (!seen.has(id)) seen.set(id, {...e, first:col, last:col});
+        else seen.get(id).last = col;
+      }
+    });
+    const lanes = [];
+    const bars = [...seen.values()].sort((a,b) => a.first-b.first || b.last-a.last || a.startDate.localeCompare(b.startDate) || a.id.localeCompare(b.id));
+    for (const bar of bars) {
+      let lane = lanes.findIndex(end => end < bar.first);
+      if (lane < 0) lane = lanes.length;
+      lanes[lane] = bar.last;
+      bar.lane = lane;
+    }
+    return {bars, count:lanes.length};
+  }
   async function renderSide() {
     await clearSide();
     if (!active()) return;
     if (!rootDoc) rootDoc = await api.getRootDocument();
-    if (!rootDoc) {status('옆쪽 달력을 표시하려면 메인 화면 접근 권한이 필요해요. 설정을 다시 저장해 권한을 허용해 주세요.', true); return;}
+    if (!rootDoc) {status('달력을 표시하려면 메인 화면 접근 권한이 필요합니다.', true); return;}
     const body = await rootDoc.querySelector('body'); if (!body) return;
-    const old = await rootDoc.querySelector(`[x-diary="${ROOT}"]`); if (old) await old.remove();
+    const old = await rootDoc.querySelector('[x-diary="' + ROOT + '"]'); if (old) await old.remove();
     root = await rootDoc.createElement('div');
     await root.setAttribute('x-diary', ROOT);
-    await root.setStyleAttribute('position:fixed;right:0;top:14%;z-index:800;font:13px/1.5 system-ui,sans-serif;color:#f3eddf;box-sizing:border-box;');
+    await root.setStyleAttribute('position:fixed;right:0;top:14%;z-index:800;font:13px/1.35 sans-serif;color:#333;box-sizing:border-box;');
     const bindings = [];
-    function b(label, action, extra = '') {
-      const id = `diary-action-${bindings.length}`; bindings.push([id, action]);
-      return `<button type="button" data-diary-action="${id}" style="${buttonStyle}${extra}">${esc(label)}</button>`;
+    function bind(action) {
+      const id = 'diary-action-' + bindings.length;
+      bindings.push([id, action]); return id;
+    }
+    function b(label, action, extra = '', title = '') {
+      return '<button type="button" data-diary-action="' + bind(action) + '" style="' + buttonStyle + extra + '"' + (title ? ' title="' + esc(title) + '" aria-label="' + esc(title) + '"' : '') + '>' + esc(label) + '</button>';
     }
     const d = diary();
     let html;
     if (!expanded) {
-      html = b('▤ 달력', async () => { expanded = true; await renderSide(); }, 'border-radius:12px 0 0 12px;padding:12px 9px;box-shadow:0 4px 18px #0005;');
+      html = b('달력', async () => { expanded = true; await renderSide(); }, 'background:#fff;border:1px solid #ddd;border-right:0;border-radius:4px 0 0 4px;padding:9px 7px;');
     } else {
       const p = parts(month), today = d?.today || initialDate();
       const day = d?.days?.[selected] || {entries: [], note: ''};
-      const nav = b('‹', async () => {month = shift(month, -1, 'month'); await renderSide();}) +
-        `<strong style="flex:1;text-align:center">${p.y}년 ${p.m}월</strong>` +
-        b('›', async () => {month = shift(month, 1, 'month'); await renderSide();});
-      const cells = monthCells(month).map(key => {
-        if (!key) return '<span></span>';
-        const saved = d?.days?.[key];
-        const mark = entriesOn(d, key).length ? '•' : saved?.note ? '·' : '';
-        return b(`${Number(key.slice(-2))}${mark}`, async () => {selected = key; await renderSide();},
-          `min-height:37px;padding:5px 2px;${key === selected ? 'background:#d7c394;color:#27241c;border-color:#d7c394;' : key === today ? 'border-color:#d7c394;' : 'border-color:transparent;'}`);
-      }).join('');
-      const entries = entriesOn(d, selected).map(e => b(`${e.done ? '✓ ' : ''}${e.time ? e.time + ' ' : ''}${e.title}${e.endDate !== e.startDate ? ' · ' + e.startDate + ' ~ ' + e.endDate : ''}`, () => openEditor(e.id), 'width:100%;text-align:left;margin-top:6px;overflow-wrap:anywhere;' + (e.done ? 'opacity:.65;' : ''))).join('');
-      html = `<section style="width:min(350px,calc(100vw - 18px));max-height:74dvh;overflow:auto;overscroll-behavior:contain;background:#24231f;border:1px solid #655f53;border-radius:16px 0 0 16px;padding:14px;box-shadow:0 8px 32px #0007;box-sizing:border-box;">
-        <div style="display:flex;align-items:center;gap:8px"><strong style="flex:1">작은 기록장</strong>${b('설정', () => openSettings())}${b('접기', async () => {expanded = false; await renderSide();})}</div>
-        <div style="font-size:11px;color:#c6bda9;margin:5px 0 12px;overflow-wrap:anywhere">${esc(context.name)} · ${esc(context.chatName)}</div>
-        <div style="display:flex;gap:8px;align-items:center">${nav}</div>
-        <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;text-align:center;margin:12px 0 8px">${'일월화수목금토'.split('').map(w => `<span style="color:#aaa28e;font-size:11px">${w}</span>`).join('')}${cells}</div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap">${b('이야기 오늘', async () => {selected = today; month = today.slice(0,7)+'-01'; await renderSide();})}${b('날짜 설정', () => openSettings())}</div>
-        <div style="margin:13px 0 4px;font-weight:700">${esc(selected)}${selected === today ? ' · 이야기 오늘' : ''}</div>
-        ${entries || '<p style="color:#aaa28e">등록된 약속이 없어요.</p>'}
-        ${day.note ? `<p style="white-space:pre-wrap;overflow-wrap:anywhere;color:#d0c7b5;max-height:120px;overflow:auto">${esc(day.note)}</p>` : ''}
-        <div style="display:flex;gap:6px;margin-top:12px">${b('+ 약속', () => openEditor())}${b('하루 메모', () => openNote())}</div>
-      </section>`;
+      const nav = b('‹', async () => {month = shift(month, -1, 'month'); await renderSide();}, '', '이전 달') +
+        '<span style="font-size:18px;font-weight:700">' + monthNames[p.m-1] + '</span><span style="font-size:14px">' + p.y + '</span>' +
+        b('›', async () => {month = shift(month, 1, 'month'); await renderSide();}, '', '다음 달');
+      const keys = monthCells(month);
+      const weeks = [];
+      for (let i = 0; i < keys.length; i += 7) {
+        const wk = keys.slice(i,i+7);
+        const ranges = weekRanges(d, wk);
+        const eventTop = Math.max(32, 19 + ranges.count * 15);
+        const cells = wk.map((key,col) => {
+          const base = 'grid-row:1;grid-column:' + (col+1) + ';position:relative;min-width:0;box-sizing:border-box;border:.5px solid #ddd;';
+          if (!key) return '<div style="' + base + 'background:#fafafa"></div>';
+          const single = entriesOn(d,key).filter(e => e.startDate === e.endDate);
+          const labels = single.map(e => '<div style="font-size:11px;line-height:1.25;overflow-wrap:anywhere;letter-spacing:-.03em;' + (e.done ? 'text-decoration:line-through;opacity:.65;' : '') + '">' + esc(e.title) + '</div>').join('');
+          const note = d?.days?.[key]?.note;
+          const background = key === selected ? 'background:#edf5ff;' : 'background:#fff;';
+          const dateStyle = key === today ? 'font-weight:700;color:#2769a8;' : '';
+          return '<button type="button" aria-label="' + esc(key) + '" data-diary-action="' + bind(async () => {selected = key; await renderSide();}) + '" style="' + buttonStyle + base + background + 'text-align:left;align-self:stretch;width:100%;padding:' + eventTop + 'px 3px 4px;">' +
+            '<span style="position:absolute;top:2px;left:4px;font-size:12px;' + dateStyle + '">' + Number(key.slice(-2)) + '</span>' +
+            (note ? '<span title="메모" style="position:absolute;top:2px;right:3px;font-size:11px;color:#999">·</span>' : '') + labels + '</button>';
+        }).join('');
+        const bars = ranges.bars.map(e => {
+          const startsHere = wk[e.first] === e.startDate;
+          return '<div style="grid-row:1;grid-column:' + (e.first+1) + ' / ' + (e.last+2) + ';align-self:start;margin-top:' + (17+e.lane*15) + 'px;height:13px;line-height:13px;background:linear-gradient(to bottom,transparent 60%,rgba(86,160,244,.3) 60%);font-size:10px;padding-left:4px;min-width:0;overflow:hidden;white-space:nowrap;z-index:1;pointer-events:none;' + (e.done ? 'opacity:.55;text-decoration:line-through;' : '') + '">' + (startsHere || e.first === 0 || !wk[e.first-1] ? esc(e.title) : '') + '</div>';
+        }).join('');
+        weeks.push('<div style="position:relative;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:minmax(' + Math.max(70,eventTop+20) + 'px,auto)">' + cells + bars + '</div>');
+      }
+      const entries = entriesOn(d, selected).map(e => b((e.done ? '✓ ' : '') + (e.time ? e.time + ' ' : '') + e.title + (e.endDate !== e.startDate ? ' · ' + e.startDate + ' ~ ' + e.endDate : ''), () => openEditor(e.id), 'display:block;width:100%;text-align:left;padding:5px 0;border-bottom:1px solid #eee;overflow-wrap:anywhere;' + (e.done ? 'opacity:.65;text-decoration:line-through;' : ''))).join('');
+      html = '<section style="width:min(350px,calc(100vw - 18px));max-height:74dvh;overflow:auto;overscroll-behavior:contain;background:#fff;border:1px solid #ddd;border-right:0;border-radius:4px 0 0 4px;padding:8px;box-sizing:border-box;color:#333;">' +
+        '<header style="display:flex;align-items:baseline;gap:4px;margin-bottom:10px">' + nav +
+        '<span style="flex:1"></span>' +
+        b('오늘', async () => {selected = today; month = today.slice(0,7)+'-01'; await renderSide();}) +
+        b('⚙', () => openSettings(), '', '설정') +
+        b('×', async () => {expanded = false; await renderSide();}, '', '접기') + '</header>' +
+        '<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));text-align:center;font-size:12px;margin-bottom:3px">' + '월화수목금토일'.split('').map(w => '<span>' + w + '</span>').join('') + '</div>' +
+        weeks.join('') +
+        '<div style="display:flex;align-items:center;gap:4px;margin-top:10px;border-bottom:1px solid #ddd;padding-bottom:4px"><strong style="flex:1;font-size:12px">' + esc(selected) + '</strong>' +
+        b('+ 일정', () => openEditor()) + b('메모', () => openNote()) + '</div>' +
+        entries +
+        (day.note ? '<div style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;font-size:12px;padding:6px 0">' + esc(day.note) + '</div>' : '') +
+        '</section>';
     }
     await root.setInnerHTML(html); await body.appendChild(root);
     await Promise.all(bindings.map(async ([id, callback]) => {
@@ -217,7 +263,7 @@
   }
   async function openSettings() {
     await refresh();
-    const main = await shell('달력 · 작은 기록장');
+    const main = await shell('달력');
     if (!context) {el('p', '사용할 캐릭터의 채팅을 연 뒤 다시 실행해 주세요.', main); return;}
     const ctx = clone(context);
     el('p', `${ctx.name} · ${ctx.chatName}`, main).className = 'hint';
@@ -228,7 +274,7 @@
     chatLabel.appendChild(document.createTextNode('현재 채팅에서 사용'));
     const toggleChat = () => {ch.disabled = !cb.checked;}; toggleChat(); cb.addEventListener('change', toggleChat);
     el('p', '캐릭터 사용을 켜야 달력 탭이 나타나요. 이 캐릭터의 다른 채팅은 기본으로 사용하며, 각 채팅에서 따로 끌 수 있어요. 기록은 채팅별로 나뉘고, 꺼도 그대로 보관해요.', sec).className='hint';
-    const today = field(sec, '이야기 오늘', 'text', diary(ctx)?.today || initialDate()); today.placeholder='YYYY-MM-DD';
+    const today = field(sec, '현재 날짜', 'text', diary(ctx)?.today || initialDate()); today.placeholder='YYYY-MM-DD';
     el('p', '1~9999년의 양력 날짜를 사용해요. 처음에는 기기 날짜로 시작하며 이후에는 직접 바꿀 수 있어요.', sec).className='hint';
     action(sec, '설정 저장', async () => {
       await assertCurrent(ctx);
@@ -332,7 +378,7 @@
       if(saved.version!==1 || !saved.bots || typeof saved.bots!=='object') throw new Error('저장 데이터 형식을 확인할 수 없어 초기화를 중단했어요.');
       state=saved;
     }
-    const registration=await api.registerSetting('달력 · 작은 기록장',()=>work(openSettings),'📓','html','calendar-diary-settings');
+    const registration=await api.registerSetting('달력',()=>work(openSettings),'📓','html','calendar-diary-settings');
     settingsId=registration?.id;
     await refresh(true);
     let polling=false;
