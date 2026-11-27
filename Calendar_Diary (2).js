@@ -1,7 +1,7 @@
 //@name calendar_diary
 //@display-name 달력
 //@api 3.0
-//@version 0.1.6
+//@version 0.1.7
 //@update-url https://raw.githubusercontent.com/hhja37984-AI/DaylifePlayroom/refs/heads/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
@@ -251,30 +251,46 @@
     await attachSideBindings(box,bindings,menuListeners);
   }
   async function attachPressBindings() {
-    // One set of listeners per calendar grid, not four listeners per date.
-    const grid = await root.querySelector('[x-diary-grid]');
-    if (!grid) return;
-    // SafeElement event payloads may not expose a target element. Each cell
-    // gets a pointerdown listener; release/cancel is shared on the grid.
+    const panel = root;
     const keys = monthCells(month).filter(Boolean);
-    await Promise.all(keys.map(async key=>{
-      const cell = await root.querySelector('[x-diary-date="'+key+'"]');
-      if (!cell) return;
-      const id = await cell.addEventListener('pointerdown',()=>{
-        cancelPress(); pressedKey=key;
-        const panel=root;
-        pressTimer=setTimeout(()=>{
-          if(pressedKey!==key || panel!==root) return;
-          suppressUntil=Date.now()+1000;
-          work(async()=>{if(panel===root && expanded && active()) await showDayMenu(key);});
-        },500);
+    let lastMenuKey = '', lastMenuAt = 0;
+    function trigger(key) {
+      cancelPress();
+      if (panel !== root || !expanded) return;
+      const now = Date.now();
+      if (lastMenuKey === key && now-lastMenuAt < 900) return;
+      lastMenuKey = key; lastMenuAt = now;
+      suppressUntil = now+1200;
+      work(async () => {
+        if (panel !== root || !expanded || !active()) return;
+        const before = signature(context);
+        await refresh();
+        if (panel === root && before === signature(context) && active()) await showDayMenu(key);
       });
-      listeners.push([cell,id,'pointerdown']);
-    }));
-    for(const type of ['pointerup','pointercancel','pointerleave','scroll']) {
-      const id=await grid.addEventListener(type,cancelPress);
-      listeners.push([grid,id,type]);
     }
+    async function on(el,type,fn) {
+      try {
+        const id = await el.addEventListener(type,fn);
+        listeners.push([el,id,type]);
+      } catch(error) { console.warn('[Calendar Diary] Gesture event unavailable:',type,error); }
+    }
+    await Promise.all(keys.map(async key => {
+      const cell = await panel.querySelector('[x-diary-date="'+key+'"]');
+      if (!cell) return;
+      // Native contextmenu covers desktop right click and browser-generated
+      // mobile long press. Touch events supply a timer fallback.
+      await on(cell,'contextmenu',event => {
+        try { event?.preventDefault?.(); } catch (_) {}
+        trigger(key);
+      });
+      await on(cell,'touchstart',() => {
+        cancelPress(); pressedKey=key;
+        pressTimer=setTimeout(()=>{if(pressedKey===key) trigger(key);},550);
+      });
+      await on(cell,'touchend',cancelPress);
+      await on(cell,'touchcancel',cancelPress);
+      await on(cell,'touchmove',cancelPress);
+    }));
   }
   async function renderSide() {
     await clearSide();
