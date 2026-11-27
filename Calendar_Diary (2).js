@@ -1,7 +1,7 @@
 //@name calendar_diary
 //@display-name 달력
 //@api 3.0
-//@version 0.1.2
+//@version 0.1.3
 //@update-url https://github.com/hhja37984-AI/DaylifePlayroom/blob/main/Calendar_Diary%20(2).js
 
 /* Manual, chat-scoped diary. No prompt insertion or model requests.
@@ -130,7 +130,14 @@
     const saved = await api.getChatFromIndex(ctx.characterIndex, ctx.chatIndex);
     return {...ctx, chatId: saved.id};
   }
+  let detailListeners = [], cellStyles = new Map();
+  async function clearDetails() {
+    for (const [el,id] of detailListeners) await el.removeEventListener('click',id);
+    detailListeners = [];
+  }
   async function clearSide() {
+    await clearDetails();
+    cellStyles.clear();
     for (const [el, id] of listeners) await el.removeEventListener('click', id);
     listeners = [];
     if (root) { await root.remove(); root = null; }
@@ -160,6 +167,48 @@
     }
     return {bars, count:lanes.length};
   }
+  async function attachSideBindings(scope, bindings, target) {
+    await Promise.all(bindings.map(async ([id, callback]) => {
+      const el = await scope.querySelector('[data-diary-action="' + id + '"]');
+      if (el) target.push([el, await el.addEventListener('click', () => work(async () => {
+        const before = signature(context);
+        const panel = root;
+        await refresh();
+        if (before === signature(context) && active() && panel === root) await callback();
+      }))]);
+    }));
+  }
+  async function renderSelectedDetails() {
+    if (!root || !expanded) return;
+    const dateEl = await root.querySelector('[x-diary-selected]');
+    const detail = await root.querySelector('[x-diary-details]');
+    if (!dateEl || !detail) return;
+    await clearDetails();
+    await dateEl.setInnerHTML(esc(selected));
+    const d = diary(), day = d?.days?.[selected] || {entries:[],note:''};
+    const bindings = [];
+    const entries = entriesOn(d,selected).map(e => {
+      const id = 'diary-detail-' + bindings.length;
+      bindings.push([id, () => openEditor(e.id)]);
+      const label = (e.done ? '✓ ' : '') + (e.time ? e.time + ' ' : '') + e.title + (e.endDate !== e.startDate ? ' · ' + e.startDate + ' ~ ' + e.endDate : '');
+      return '<button type="button" data-diary-action="' + id + '" style="' + buttonStyle + 'display:block;width:100%;text-align:left;padding:5px 0;border-bottom:1px solid #eee;overflow-wrap:anywhere;' + (e.done ? 'opacity:.65;text-decoration:line-through;' : '') + '">' + esc(label) + '</button>';
+    }).join('');
+    await detail.setInnerHTML(entries + (day.note ? '<div style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;font-size:12px;padding:6px 0">' + esc(day.note) + '</div>' : ''));
+    await attachSideBindings(detail,bindings,detailListeners);
+  }
+  async function selectDate(key) {
+    if (key === selected) return;
+    const previous = selected;
+    selected = key;
+    if (!root || !expanded) return;
+    for (const date of [previous,key]) {
+      const style = cellStyles.get(date);
+      if (!style) continue;
+      const cell = await root.querySelector('[x-diary-date="' + date + '"]');
+      if (cell) await cell.setStyleAttribute(style + (date === selected ? 'background:#edf5ff;' : 'background:#fff;'));
+    }
+    await renderSelectedDetails();
+  }
   async function renderSide() {
     await clearSide();
     if (!active()) return;
@@ -184,7 +233,6 @@
       html = b('달력', async () => { expanded = true; await renderSide(); }, 'background:#fff;border:1px solid #ddd;border-right:0;border-radius:4px 0 0 4px;padding:9px 7px;');
     } else {
       const p = parts(month), today = d?.today || initialDate();
-      const day = d?.days?.[selected] || {entries: [], note: ''};
       const nav = b('‹', async () => {month = shift(month, -1, 'month'); await renderSide();}, '', '이전 달') +
         '<span style="font-size:18px;font-weight:700">' + monthNames[p.m-1] + '</span><span style="font-size:14px">' + p.y + '</span>' +
         b('›', async () => {month = shift(month, 1, 'month'); await renderSide();}, '', '다음 달');
@@ -200,9 +248,11 @@
           const single = entriesOn(d,key).filter(e => e.startDate === e.endDate);
           const labels = single.map(e => '<div style="font-size:11px;line-height:1.25;overflow-wrap:anywhere;letter-spacing:-.03em;' + (e.done ? 'text-decoration:line-through;opacity:.65;' : '') + '">' + esc(e.title) + '</div>').join('');
           const note = d?.days?.[key]?.note;
+          const cellStyle = buttonStyle + base + 'text-align:left;align-self:stretch;width:100%;padding:' + eventTop + 'px 3px 4px;';
+          cellStyles.set(key,cellStyle);
           const background = key === selected ? 'background:#edf5ff;' : 'background:#fff;';
           const dateStyle = key === today ? 'font-weight:700;color:#2769a8;' : '';
-          return '<button type="button" aria-label="' + esc(key) + '" data-diary-action="' + bind(async () => {selected = key; await renderSide();}) + '" style="' + buttonStyle + base + background + 'text-align:left;align-self:stretch;width:100%;padding:' + eventTop + 'px 3px 4px;">' +
+          return '<button type="button" x-diary-date="' + esc(key) + '" aria-label="' + esc(key) + '" data-diary-action="' + bind(() => selectDate(key)) + '" style="' + cellStyle + background + '">' +
             '<span style="position:absolute;top:2px;left:4px;font-size:12px;' + dateStyle + '">' + Number(key.slice(-2)) + '</span>' +
             (note ? '<span title="메모" style="position:absolute;top:2px;right:3px;font-size:11px;color:#999">·</span>' : '') + labels + '</button>';
         }).join('');
@@ -212,29 +262,23 @@
         }).join('');
         weeks.push('<div style="position:relative;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:minmax(' + Math.max(70,eventTop+20) + 'px,auto)">' + cells + bars + '</div>');
       }
-      const entries = entriesOn(d, selected).map(e => b((e.done ? '✓ ' : '') + (e.time ? e.time + ' ' : '') + e.title + (e.endDate !== e.startDate ? ' · ' + e.startDate + ' ~ ' + e.endDate : ''), () => openEditor(e.id), 'display:block;width:100%;text-align:left;padding:5px 0;border-bottom:1px solid #eee;overflow-wrap:anywhere;' + (e.done ? 'opacity:.65;text-decoration:line-through;' : ''))).join('');
-      html = '<section style="width:min(350px,calc(100vw - 18px));max-height:74dvh;overflow:auto;overscroll-behavior:contain;background:#fff;border:1px solid #ddd;border-right:0;border-radius:4px 0 0 4px;padding:8px;box-sizing:border-box;color:#333;">' +
+      html = b('', async () => {expanded = false; await renderSide();}, 'position:fixed;inset:0;width:100vw;height:100dvh;padding:0;background:transparent;z-index:0;', '달력 바깥을 눌러 닫기') +
+        '<section style="position:relative;z-index:1;width:min(350px,calc(100vw - 18px));max-height:74dvh;overflow:auto;overscroll-behavior:contain;background:#fff;border:1px solid #ddd;border-right:0;border-radius:4px 0 0 4px;padding:8px;box-sizing:border-box;color:#333;">' +
         '<header style="display:flex;align-items:baseline;gap:4px;margin-bottom:10px">' + nav +
         '<span style="flex:1"></span>' +
-        b('오늘', async () => {selected = today; month = today.slice(0,7)+'-01'; await renderSide();}) +
+        b('오늘', async () => {if (month.slice(0,7) === today.slice(0,7)) await selectDate(today); else {selected = today; month = today.slice(0,7)+'-01'; await renderSide();}}) +
         b('⚙', () => openSettings(), '', '설정') +
         b('×', async () => {expanded = false; await renderSide();}, '', '접기') + '</header>' +
         '<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));text-align:center;font-size:12px;margin-bottom:3px">' + '월화수목금토일'.split('').map(w => '<span>' + w + '</span>').join('') + '</div>' +
         weeks.join('') +
-        '<div style="display:flex;align-items:center;gap:4px;margin-top:10px;border-bottom:1px solid #ddd;padding-bottom:4px"><strong style="flex:1;font-size:12px">' + esc(selected) + '</strong>' +
+        '<div style="display:flex;align-items:center;gap:4px;margin-top:10px;border-bottom:1px solid #ddd;padding-bottom:4px"><strong x-diary-selected="1" style="flex:1;font-size:12px">' + esc(selected) + '</strong>' +
         b('+ 일정', () => openEditor()) + b('메모', () => openNote()) + '</div>' +
-        entries +
-        (day.note ? '<div style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;font-size:12px;padding:6px 0">' + esc(day.note) + '</div>' : '') +
+        '<div x-diary-details="1"></div>' +
         '</section>';
     }
     await root.setInnerHTML(html); await body.appendChild(root);
-    await Promise.all(bindings.map(async ([id, callback]) => {
-      const el = await root.querySelector(`[data-diary-action="${id}"]`);
-      if (el) listeners.push([el, await el.addEventListener('click', () => work(async () => {
-        const before = signature(context); await refresh();
-        if (before === signature(context) && active()) await callback();
-      }))]);
-    }));
+    await attachSideBindings(root,bindings,listeners);
+    if (expanded) await renderSelectedDetails();
   }
   const css = `*{box-sizing:border-box}body{margin:0;background:#191b1a;color:#ecece5;font:15px/1.6 system-ui,sans-serif;padding:18px}main{max-width:620px;margin:auto}h1{font-size:21px;margin:0}h2{font-size:17px}header,.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}header h1{flex:1}section{padding:16px;border:1px solid #485149;border-radius:14px;margin-top:18px;background:#222723}label{display:block;margin:14px 0 5px}input,textarea,select,button{font:inherit;color:inherit;border:1px solid #626d60;border-radius:8px;padding:10px;background:#161b17}input:not([type=checkbox]),textarea{width:100%}textarea{min-height:160px;resize:vertical}button{cursor:pointer;background:#354236}button:disabled{opacity:.45;cursor:default}input[type=checkbox]{width:20px;height:20px;vertical-align:middle;margin-right:8px}.hint{font-size:13px;color:#b9c4b6;white-space:pre-wrap;overflow-wrap:anywhere}.danger{background:#50362f}#diary-status{min-height:1.6em;white-space:pre-wrap}`;
   function el(tag, text, parent) { const n = document.createElement(tag); if (text) n.textContent = text; if(parent) parent.appendChild(n); return n; }
